@@ -665,6 +665,288 @@ static inline bool scte35_private_validate(const uint8_t *p_scte35)
 }
 
 /*****************************************************************************
+ * Splice Information Table - splice descriptor
+ *****************************************************************************/
+#define SCTE35_SPLICE_DESC_HEADER_SIZE  6
+
+#define SCTE35_SPLICE_DESC_TAG_AVAIL    0x00
+#define SCTE35_SPLICE_DESC_TAG_DTMF     0x01
+#define SCTE35_SPLICE_DESC_TAG_SEG      0x02
+
+#define scte35_splice_desc_get_tag      desc_get_tag
+#define scte35_splice_desc_get_length   desc_get_length
+
+static inline uint32_t scte35_splice_desc_get_identifier(const uint8_t *p_desc)
+{
+    return ((uint32_t)p_desc[2] << 24) | (p_desc[3] << 16) |
+        (p_desc[4] << 8) | p_desc[5];
+}
+
+/*****************************************************************************
+ * Splice Information Table - segmentation descriptor
+ *****************************************************************************/
+static inline uint32_t scte35_seg_desc_get_event_id(const uint8_t *p_desc)
+{
+    return ((uint32_t)p_desc[6] << 24) | (p_desc[7] << 16) |
+        (p_desc[8] << 8) | p_desc[9];
+}
+
+static inline bool scte35_seg_desc_has_cancel(const uint8_t *p_desc)
+{
+    return !!(p_desc[10] & 0x80);
+}
+
+static inline bool scte35_seg_desc_has_program_seg(const uint8_t *p_desc)
+{
+    return !scte35_seg_desc_has_cancel(p_desc) &&
+        !!(p_desc[11] & 0x80);
+}
+
+static inline bool scte35_seg_desc_has_duration(const uint8_t *p_desc)
+{
+    return !scte35_seg_desc_has_cancel(p_desc) &&
+        !!(p_desc[11] & 0x40);
+}
+
+static inline bool
+scte35_seg_desc_has_delivery_not_restricted(const uint8_t *p_desc)
+{
+    return !scte35_seg_desc_has_cancel(p_desc) &&
+        !!(p_desc[11] & 0x20);
+}
+
+static inline bool
+scte35_seg_desc_has_web_delivery_allowed(const uint8_t *p_desc)
+{
+    return !scte35_seg_desc_has_delivery_not_restricted(p_desc) &&
+        !!(p_desc[11] & 0x10);
+}
+
+static inline bool
+scte35_seg_desc_has_no_regional_blackout(const uint8_t *p_desc)
+{
+    return !scte35_seg_desc_has_delivery_not_restricted(p_desc) &&
+        !!(p_desc[11] & 0x08);
+}
+
+static inline bool
+scte35_seg_desc_has_archive_allowed(const uint8_t *p_desc)
+{
+    return !scte35_seg_desc_has_delivery_not_restricted(p_desc) &&
+        !!(p_desc[11] & 0x04);
+}
+
+#define SCTE35_SEG_DESC_DEVICE_RESTRICTION_GRP0 0x00
+#define SCTE35_SEG_DESC_DEVICE_RESTRICTION_GRP1 0x01
+#define SCTE35_SEG_DESC_DEVICE_RESTRICTION_GRP2 0x02
+#define SCTE35_SEG_DESC_DEVICE_RESTRICTION_NONE 0x03
+
+static inline uint8_t
+scte35_seg_desc_get_device_restrictions(const uint8_t *p_desc)
+{
+    return p_desc[11] & 0x03;
+}
+
+static inline uint8_t scte35_seg_desc_get_component_count(const uint8_t *p_desc)
+{
+    return scte35_seg_desc_has_program_seg(p_desc) ? 0 : p_desc[12];
+}
+
+static inline uint8_t *scte35_seg_desc_get_component(const uint8_t *p_desc,
+                                                     uint8_t i)
+{
+    if (i < scte35_seg_desc_get_component_count(p_desc))
+        return (uint8_t *)p_desc + 13 + 6 * i;
+    return NULL;
+}
+
+static inline uint8_t scte35_seg_desc_component_get_tag(const uint8_t *p_comp)
+{
+    return p_comp[0];
+}
+
+static inline uint64_t
+scte35_seg_desc_component_get_pts_off(const uint8_t *p_comp)
+{
+    return (((uint64_t)p_comp[1] & 0x1) << 32) | (p_comp[2] << 24) |
+        (p_comp[3] << 16) | (p_comp[4] << 8) | p_comp[5];
+}
+
+static inline uint64_t scte35_seg_desc_get_duration(const uint8_t *p_desc)
+{
+    if (scte35_seg_desc_has_cancel(p_desc) ||
+        !scte35_seg_desc_has_duration(p_desc))
+        return 0;
+    const uint8_t *p = p_desc + 12;
+    if (!scte35_seg_desc_has_program_seg(p_desc))
+        p += 1 + 6 * scte35_seg_desc_get_component_count(p_desc);
+    return ((uint64_t)p[0] << 32) | (p[1] << 24) | (p[2] << 16) | (p[3] < 8) |
+        p[4];
+}
+
+static inline uint8_t scte35_seg_desc_get_upid_type(const uint8_t *p_desc)
+{
+    if (scte35_seg_desc_has_cancel(p_desc))
+        return 0;
+    const uint8_t *p = p_desc + 12;
+    if (!scte35_seg_desc_has_program_seg(p_desc))
+        p += 1 + 6 * scte35_seg_desc_get_component_count(p_desc);
+    if (scte35_seg_desc_has_duration(p_desc))
+        p += 5;
+    return p[0];
+}
+
+static inline uint8_t scte35_seg_desc_get_upid_length(const uint8_t *p_desc)
+{
+    if (scte35_seg_desc_has_cancel(p_desc))
+        return 0;
+    const uint8_t *p = p_desc + 12;
+    if (!scte35_seg_desc_has_program_seg(p_desc))
+        p += 1 + 6 * scte35_seg_desc_get_component_count(p_desc);
+    if (scte35_seg_desc_has_duration(p_desc))
+        p += 5;
+    return p[1];
+}
+
+static inline uint8_t *scte35_seg_desc_get_upid(const uint8_t *p_desc)
+{
+    if (scte35_seg_desc_has_cancel(p_desc))
+        return 0;
+    const uint8_t *p = p_desc + 12;
+    if (!scte35_seg_desc_has_program_seg(p_desc))
+        p += 1 + 6 * scte35_seg_desc_get_component_count(p_desc);
+    if (scte35_seg_desc_has_duration(p_desc))
+        p += 5;
+    return (uint8_t *)p + 2;
+}
+
+static inline uint8_t scte35_seg_desc_get_type_id(const uint8_t *p_desc)
+{
+    if (scte35_seg_desc_has_cancel(p_desc))
+        return 0;
+    const uint8_t *p = p_desc + 12;
+    if (!scte35_seg_desc_has_program_seg(p_desc))
+        p += 1 + 6 * scte35_seg_desc_get_component_count(p_desc);
+    if (scte35_seg_desc_has_duration(p_desc))
+        p += 5;
+    p += 2;
+    p += scte35_seg_desc_get_upid_length(p_desc);
+    return p[0];
+}
+
+static inline uint8_t scte35_seg_desc_get_num(const uint8_t *p_desc)
+{
+    if (scte35_seg_desc_has_cancel(p_desc))
+        return 0;
+    const uint8_t *p = p_desc + 12;
+    if (!scte35_seg_desc_has_program_seg(p_desc))
+        p += 1 + 6 * scte35_seg_desc_get_component_count(p_desc);
+    if (scte35_seg_desc_has_duration(p_desc))
+        p += 5;
+    p += 2;
+    p += scte35_seg_desc_get_upid_length(p_desc);
+    return p[1];
+}
+
+static inline uint8_t scte35_seg_desc_get_expected(const uint8_t *p_desc)
+{
+    if (scte35_seg_desc_has_cancel(p_desc))
+        return 0;
+    const uint8_t *p = p_desc + 12;
+    if (!scte35_seg_desc_has_program_seg(p_desc))
+        p += 1 + 6 * scte35_seg_desc_get_component_count(p_desc);
+    if (scte35_seg_desc_has_duration(p_desc))
+        p += 5;
+    p += 2;
+    p += scte35_seg_desc_get_upid_length(p_desc);
+    return p[2];
+}
+
+static inline bool scte35_seg_desc_has_sub_num(const uint8_t *p_desc)
+{
+    if (scte35_seg_desc_has_cancel(p_desc))
+        return false;
+
+    uint8_t type_id = scte35_seg_desc_get_type_id(p_desc);
+    if (type_id != 0x34 && type_id != 0x36)
+        return false;
+
+    const uint8_t *p = p_desc + 12;
+    if (!scte35_seg_desc_has_program_seg(p_desc))
+        p += 1 + 6 * scte35_seg_desc_get_component_count(p_desc);
+    if (scte35_seg_desc_has_duration(p_desc))
+        p += 5;
+    p += 2;
+    p += scte35_seg_desc_get_upid_length(p_desc);
+    if (p + 3 < p_desc + scte35_splice_desc_get_length(p_desc))
+        return true;
+    return false;
+}
+
+static inline uint8_t scte35_seg_desc_get_sub_num(const uint8_t *p_desc)
+{
+    if (scte35_seg_desc_has_cancel(p_desc))
+        return 0;
+
+    uint8_t type_id = scte35_seg_desc_get_type_id(p_desc);
+    if (type_id != 0x34 && type_id != 0x36)
+        return 0;
+
+    const uint8_t *p = p_desc + 12;
+    if (!scte35_seg_desc_has_program_seg(p_desc))
+        p += 1 + 6 * scte35_seg_desc_get_component_count(p_desc);
+    if (scte35_seg_desc_has_duration(p_desc))
+        p += 5;
+    p += 2;
+    p += scte35_seg_desc_get_upid_length(p_desc);
+    if (p + 3 < p_desc + scte35_splice_desc_get_length(p_desc))
+        return p[3];
+    return 0;
+}
+
+static inline bool scte35_seg_desc_has_sub_expected(const uint8_t *p_desc)
+{
+    if (scte35_seg_desc_has_cancel(p_desc))
+        return false;
+
+    uint8_t type_id = scte35_seg_desc_get_type_id(p_desc);
+    if (type_id != 0x34 && type_id != 0x36)
+        return false;
+
+    const uint8_t *p = p_desc + 12;
+    if (!scte35_seg_desc_has_program_seg(p_desc))
+        p += 1 + 6 * scte35_seg_desc_get_component_count(p_desc);
+    if (scte35_seg_desc_has_duration(p_desc))
+        p += 5;
+    p += 2;
+    p += scte35_seg_desc_get_upid_length(p_desc);
+    if (p + 4 < p_desc + scte35_splice_desc_get_length(p_desc))
+        return true;
+    return false;
+}
+
+static inline uint8_t scte35_seg_desc_get_sub_expected(const uint8_t *p_desc)
+{
+    if (scte35_seg_desc_has_cancel(p_desc))
+        return 0;
+
+    uint8_t type_id = scte35_seg_desc_get_type_id(p_desc);
+    if (type_id != 0x34 && type_id != 0x36)
+        return 0;
+
+    const uint8_t *p = p_desc + 12;
+    if (!scte35_seg_desc_has_program_seg(p_desc))
+        p += 1 + 6 * scte35_seg_desc_get_component_count(p_desc);
+    if (scte35_seg_desc_has_duration(p_desc))
+        p += 5;
+    p += 2;
+    p += scte35_seg_desc_get_upid_length(p_desc);
+    if (p + 4 < p_desc + scte35_splice_desc_get_length(p_desc))
+        return p[4];
+    return 0;
+}
+
+/*****************************************************************************
  * Splice Information Table validation
  *****************************************************************************/
 static inline bool scte35_validate(const uint8_t *p_scte35)
